@@ -9,15 +9,9 @@
 #define MAX_ARGS 128
 char msg_error[25] = "An error has occurred\n";
 
-char *path[MAX_ARGS];
-int path_count = 1;
 
 void print_error() {
     write(STDERR_FILENO, msg_error, strlen(msg_error));
-}
-
-void init_path() {
-    path[0] = "/bin";
 }
 
 void process_command(char *cmd, char **path){
@@ -50,7 +44,7 @@ void process_command(char *cmd, char **path){
     }
     args[argc] = NULL;
 
-    if (args[0] == NULL) return;  // Empty command
+    if (args[0] == NULL) return;
 
     if (!check_builtin(args)) {
         exec_process(args, path, multiple);
@@ -65,6 +59,7 @@ void exec_process(char **args, char **path, int multiple){
     if (pid == 0) {
         char execpath[MAX_LINE_LENGTH];
         int i = 0;
+
         while (path[i] != NULL) {
             snprintf(execpath, sizeof(execpath), "%s/%s", path[i], args[0]);
             execv(execpath, args);
@@ -100,7 +95,21 @@ void exec_builtin(char **args, char **path){
     } else if (strcmp(args[0], "cd") == 0) {
         change_cd(args);
     } else if (strcmp(args[0], "path") == 0) {
-        change_path(args, path);
+        append_path(args, path);
+    }
+}
+
+void append_path(char **args, char **path){
+    int i = 1;
+    int j = 0;
+
+    while (path[j] != NULL) {
+        path[j++] = NULL; 
+    }
+
+    j = 0;
+    while (args[i] != NULL) {
+        path[j++] = strdup(args[i++]);
     }
 }
 
@@ -112,21 +121,10 @@ void change_cd(char **args){
     }
 }
 
-void change_path(char **args, char **path){
-    int i = 1;
-    int j = 0;
-    while (args[i] != NULL) {
-        path[j++] = args[i++];
-    }
-    path[j] = NULL;
-}
-
 int main(int argc, char *argv[]) {
     char *cmd = NULL;
     size_t len = 0;
     FILE *input_stream = stdin;
-
-    init_path();
 
     if (argc == 2) {
         input_stream = fopen(argv[1], "r");
@@ -138,6 +136,8 @@ int main(int argc, char *argv[]) {
         print_error();
         exit(1);
     }
+
+    char *path[MAX_ARGS] = {"/bin"};
 
     while (1) {
         if (argc == 1) {
