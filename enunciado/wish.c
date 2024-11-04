@@ -17,19 +17,22 @@ void print_error() {
 void process_command(char *cmd, char **path){
     char *args[MAX_ARGS];
     int argc = 0;
-    int multiple = 0;
     char *token = strtok(cmd, " \t\n");
     int redirection = 0;
 
     while (token != NULL) {
         if (strcmp(token, "&") == 0) {
-            multiple = 1;
+            if (argc > 0) {
+                args[argc] = NULL;
+                exec_process(args, path);
+                argc = 0;
+            }
         } else if (strcmp(token, ">") == 0) {
             if (argc == 0) {
                 print_error();
                 return;
             }
-            output_redirection(token, path, multiple, args);
+            output_redirection(token, path, args);
             redirection = 1;
             break;
         } else {
@@ -43,14 +46,14 @@ void process_command(char *cmd, char **path){
 
     if (redirection == 0){
         if (!check_builtin(args)) {
-            exec_process(args, path, multiple);
+            exec_process(args, path);
         } else {
             exec_builtin(args, path);
         }
     }
 }
 
-void output_redirection(char *token, char **path, int multiple, char **args){
+void output_redirection(char *token, char **path, char **args){
     token = strtok(NULL, " \t\n");
     int saved_stdout = dup(STDOUT_FILENO);
 
@@ -68,7 +71,7 @@ void output_redirection(char *token, char **path, int multiple, char **args){
         dup2(fd, STDOUT_FILENO);
         dup2(fd, STDERR_FILENO);
 
-        exec_process(args, path, multiple);
+        exec_process(args, path);
 
         close(fd);
 
@@ -76,7 +79,7 @@ void output_redirection(char *token, char **path, int multiple, char **args){
         close(saved_stdout);
 }
 
-void exec_process(char **args, char **path, int multiple){
+void exec_process(char **args, char **path){
     int status;
     pid_t pid = fork();
     if (pid == 0) {
@@ -93,9 +96,7 @@ void exec_process(char **args, char **path, int multiple){
         print_error();
         exit(1);
     } else if (pid > 0) {
-        if (!multiple) {
-            waitpid(pid, &status, 0);
-        }
+        waitpid(pid, &status, 0);
     } else {
         print_error();
     }
