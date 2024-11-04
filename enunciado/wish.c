@@ -2,179 +2,155 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 #include <sys/wait.h>
 #include <fcntl.h>
 
 #define MAX_LINE_LENGTH 1024
-#define MAX_PATHS 100
-#define ERROR_MESSAGE "An error has occurred\n"
+#define MAX_ARGS 128
+char msg_error[25] = "An error has occurred\n";
 
-char *path[MAX_PATHS];
+char *path[MAX_ARGS];
 int path_count = 1;
 
 void print_error() {
-    write(STDERR_FILENO, ERROR_MESSAGE, strlen(ERROR_MESSAGE));
+    write(STDERR_FILENO, msg_error, strlen(msg_error));
 }
 
 void init_path() {
     path[0] = "/bin";
 }
 
-void update_path(char **args) {
-    for (int i = 0; i < path_count; i++) {
-        free(path[i]);
-    }
-    path_count = 0;
-    for (int i = 1; args[i] != NULL; i++) {
-        path[path_count] = strdup(args[i]);
-        path_count++;
-    }
-}
+void process_command(char *cmd, char **path){
+    char *args[MAX_ARGS];
+    int argc = 0;
+    int multiple = 0;
+    char *token = strtok(cmd, " \t\n");
 
-void parse_command(char *line, char **args) {
-    int i = 0;
-    args[i] = strtok(line, " \n");
-    while (args[i] != NULL) {
-        i++;
-        args[i] = strtok(NULL, " \n");
-    }
-}
-
-void execute_command(char **args) {
-    char *command = args[0];
-    int redirection = 0;
-    char *file = NULL;
-    int i = 0;
-    
-    while (args[i] != NULL) {
-        if (strcmp(args[i], ">") == 0) {
-            redirection = 1;
-            args[i] = NULL;
-            if (args[i+1] != NULL && args[i+2] == NULL) {
-                file = args[i+1];
-            } else {
+    while (token != NULL) {
+        if (strcmp(token, "&") == 0) {
+            multiple = 1;
+        } else if (strcmp(token, ">") == 0) {
+            token = strtok(NULL, " \t\n");
+            if (!token || strtok(NULL, " \t\n")) {
                 print_error();
                 return;
             }
-        }
-        i++;
-    }
-
-    pid_t pid = fork();
-    if (pid < 0) {
-        print_error();
-    } else if (pid == 0) {
-        if (redirection) {
-            int fd = open(file, O_WRONLY | O_CREAT | O_TRUNC, S_IRWXU);
-            if (fd < 0 || dup2(fd, STDOUT_FILENO) < 0 || dup2(fd, STDERR_FILENO) < 0) {
+            int fd = open(token, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            if (fd == -1) {
                 print_error();
-                exit(1);
+                return;
             }
+            dup2(fd, STDOUT_FILENO);
+            dup2(fd, STDERR_FILENO);
             close(fd);
+        } else {
+            args[argc++] = token;
         }
+        token = strtok(NULL, " \t\n");
+    }
+    args[argc] = NULL;
 
-        for (int j = 0; j < path_count; j++) {
-            char full_path[MAX_LINE_LENGTH];
-            snprintf(full_path, sizeof(full_path), "%s/%s", path[j], command);
-            if (access(full_path, X_OK) == 0) {
-                execv(full_path, args);
-            }
-        }
-        print_error();
-        exit(1);
+    if (args[0] == NULL) return;  // Empty command
+
+    if (!check_builtin(args)) {
+        exec_process(args, path, multiple);
     } else {
-        wait(NULL);
+        exec_builtin(args, path);
     }
 }
 
-int handle_builtin(char **args) {
-    if (strcmp(args[0], "exit") == 0) {
-        if (args[1] != NULL) {
-            print_error();
-        } else {
-            exit(0);
+void exec_process(char **args, char **path, int multiple){
+    int status;
+    pid_t pid = fork();
+    if (pid == 0) {
+        char execpath[MAX_LINE_LENGTH];
+        int i = 0;
+        while (path[i] != NULL) {
+            snprintf(execpath, sizeof(execpath), "%s/%s", path[i], args[0]);
+            execv(execpath, args);
+            i++;
         }
-    } else if (strcmp(args[0], "cd") == 0) {
-        if (args[1] == NULL || args[2] != NULL || chdir(args[1]) != 0) {
-            print_error();
+        print_error();
+        exit(1);
+    } else if (pid > 0) {
+        if (!multiple) {
+            waitpid(pid, &status, 0);
         }
-        return 1;
-    } else if (strcmp(args[0], "path") == 0) {
-        update_path(args);
+    } else {
+        print_error();
+    }
+}
+
+int check_builtin(char **args){
+    if (strcmp(args[0], "cd") == 0 ||
+        strcmp(args[0], "path") == 0 ||
+        strcmp(args[0], "exit") == 0) {
         return 1;
     }
     return 0;
 }
 
-void execute_parallel(char *line) {
-    char *command = strtok(line, "&");
-    pid_t pids[MAX_LINE_LENGTH];
-    int num_cmds = 0;
-
-    while (command != NULL) {
-        char *args[MAX_LINE_LENGTH / 2 + 1];
-        parse_command(command, args);
-
-        if (args[0] != NULL && !handle_builtin(args)) {
-            pids[num_cmds] = fork();
-            if (pids[num_cmds] == 0) {
-                execute_command(args);
-                exit(0);
-            }
-            num_cmds++;
-        }
-        command = strtok(NULL, "&");
-    }
-
-    for (int i = 0; i < num_cmds; i++) {
-        waitpid(pids[i], NULL, 0);
+void exec_builtin(char **args, char **path){
+    if (strcmp(args[0], "exit") == 0) {
+        if (args[1] != NULL) {
+            print_error();
+            return;
+        } 
+        exit(0);
+    } else if (strcmp(args[0], "cd") == 0) {
+        change_cd(args);
+    } else if (strcmp(args[0], "path") == 0) {
+        change_path(args, path);
     }
 }
 
-int main(int argc, char *argv[]) {
-    char line[MAX_LINE_LENGTH];
-    char *args[MAX_LINE_LENGTH / 2 + 1];
-    FILE *input = stdin;
-
-    if (argc > 2) {
+void change_cd(char **args){
+    if (args[1] == NULL || args[2] != NULL) {
         print_error();
-        exit(1);
+    } else if (chdir(args[1]) != 0) {
+        print_error();
     }
+}
+
+void change_path(char **args, char **path){
+    int i = 1;
+    int j = 0;
+    while (args[i] != NULL) {
+        path[j++] = args[i++];
+    }
+    path[j] = NULL;
+}
+
+int main(int argc, char *argv[]) {
+    char *cmd = NULL;
+    size_t len = 0;
+    FILE *input_stream = stdin;
 
     init_path();
 
     if (argc == 2) {
-        input = fopen(argv[1], "r");
-        if (input == NULL) {
+        input_stream = fopen(argv[1], "r");
+        if (!input_stream) {
             print_error();
             exit(1);
         }
+    } else if (argc > 2) {
+        print_error();
+        exit(1);
     }
 
     while (1) {
         if (argc == 1) {
             printf("wish> ");
         }
-
-        if (fgets(line, MAX_LINE_LENGTH, input) == NULL) {
-            break;
+        if (getline(&cmd, &len, input_stream) == -1) {
+            if (argc == 2) fclose(input_stream);
+            exit(0);
         }
 
-        if (strchr(line, '&')) {
-            execute_parallel(line);
-        } else {
-            parse_command(line, args);
-            if (args[0] != NULL && !handle_builtin(args)) {
-                execute_command(args);
-            }
-        }
+        process_command(cmd, path);
+        free(cmd);
+        cmd = NULL;
     }
-
-    if (argc == 2) {
-        fclose(input);
-    }
-
-    return 0;
 }
+
