@@ -33,9 +33,9 @@ void process_command(char *cmd, char **path){
                 print_error();
                 return;
             }
+            argc = 0;
             output_redirection(token, path, args);
             redirection = 1;
-            break;
         } else {
             args[argc++] = token;
         }
