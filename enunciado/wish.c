@@ -15,6 +15,7 @@ void print_error() {
 }
 
 void process_command(char *cmd, char **path){
+    preprocess_command(cmd);
     char *args[MAX_ARGS];
     int argc = 0;
     char *token = strtok(cmd, " \t\n");
@@ -51,6 +52,22 @@ void process_command(char *cmd, char **path){
             exec_builtin(args, path);
         }
     }
+}
+
+void preprocess_command(char *cmd) {
+    char temp_cmd[1024] = {0};
+    int j = 0;
+    for (int i = 0; cmd[i] != '\0'; i++) {
+        if (cmd[i] == '&' && (i == 0 || cmd[i-1] != ' ') && (cmd[i+1] != ' ' && cmd[i+1] != '\0')) {
+            temp_cmd[j++] = ' ';
+            temp_cmd[j++] = '&';
+            temp_cmd[j++] = ' ';
+        } else {
+            temp_cmd[j++] = cmd[i];
+        }
+    }
+    temp_cmd[j] = '\0';
+    strcpy(cmd, temp_cmd);
 }
 
 void output_redirection(char *token, char **path, char **args){
