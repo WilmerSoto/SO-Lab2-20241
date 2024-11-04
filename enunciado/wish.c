@@ -19,24 +19,19 @@ void process_command(char *cmd, char **path){
     int argc = 0;
     int multiple = 0;
     char *token = strtok(cmd, " \t\n");
+    int redirection = 0;
 
     while (token != NULL) {
         if (strcmp(token, "&") == 0) {
             multiple = 1;
         } else if (strcmp(token, ">") == 0) {
-            token = strtok(NULL, " \t\n");
-            if (!token || strtok(NULL, " \t\n")) {
+            if (argc == 0) {
                 print_error();
                 return;
             }
-            int fd = open(token, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-            if (fd == -1) {
-                print_error();
-                return;
-            }
-            dup2(fd, STDOUT_FILENO);
-            dup2(fd, STDERR_FILENO);
-            close(fd);
+            output_redirection(token, path, multiple, args);
+            redirection = 1;
+            break;
         } else {
             args[argc++] = token;
         }
@@ -46,11 +41,39 @@ void process_command(char *cmd, char **path){
 
     if (args[0] == NULL) return;
 
-    if (!check_builtin(args)) {
-        exec_process(args, path, multiple);
-    } else {
-        exec_builtin(args, path);
+    if (redirection == 0){
+        if (!check_builtin(args)) {
+            exec_process(args, path, multiple);
+        } else {
+            exec_builtin(args, path);
+        }
     }
+}
+
+void output_redirection(char *token, char **path, int multiple, char **args){
+    token = strtok(NULL, " \t\n");
+    int saved_stdout = dup(STDOUT_FILENO);
+
+    if (!token || strtok(NULL, " \t\n")) {
+        print_error();
+        exit(0);
+        }
+        int fd = open(token, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd == -1) {
+            print_error();
+            close(saved_stdout);
+            exit(0);
+
+        }
+        dup2(fd, STDOUT_FILENO);
+        dup2(fd, STDERR_FILENO);
+
+        exec_process(args, path, multiple);
+
+        close(fd);
+
+        dup2(saved_stdout, STDOUT_FILENO);
+        close(saved_stdout);
 }
 
 void exec_process(char **args, char **path, int multiple){
@@ -62,7 +85,9 @@ void exec_process(char **args, char **path, int multiple){
 
         while (path[i] != NULL) {
             snprintf(execpath, sizeof(execpath), "%s/%s", path[i], args[0]);
-            execv(execpath, args);
+            if (execv(execpath, args) == 0){
+                exit(0);
+            };
             i++;
         }
         print_error();
