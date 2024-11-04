@@ -72,28 +72,32 @@ void preprocess_command(char *cmd) {
 
 void output_redirection(char *token, char **path, char **args){
     token = strtok(NULL, " \t\n");
+    char *next_token = strtok(NULL, " \t\n");
     int saved_stdout = dup(STDOUT_FILENO);
 
-    if (!token || strtok(NULL, " \t\n")) {
-        print_error();
-        exit(0);
-        }
-        int fd = open(token, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        if (fd == -1) {
+    if (next_token != NULL &&(strcmp(next_token, "&") != 0) ){
+        if (!token || next_token){
             print_error();
-            close(saved_stdout);
             exit(0);
-
         }
-        dup2(fd, STDOUT_FILENO);
-        dup2(fd, STDERR_FILENO);
+    }
 
-        exec_process(args, path);
-
-        close(fd);
-
-        dup2(saved_stdout, STDOUT_FILENO);
+    int fd = open(token, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd == -1) {
+        print_error();
         close(saved_stdout);
+        exit(0);
+
+    }
+    dup2(fd, STDOUT_FILENO);
+    dup2(fd, STDERR_FILENO);
+
+    exec_process(args, path);
+
+    close(fd);
+
+    dup2(saved_stdout, STDOUT_FILENO);
+    close(saved_stdout);
 }
 
 void exec_process(char **args, char **path){
@@ -120,9 +124,7 @@ void exec_process(char **args, char **path){
 }
 
 int check_builtin(char **args){
-    if (strcmp(args[0], "cd") == 0 ||
-        strcmp(args[0], "path") == 0 ||
-        strcmp(args[0], "exit") == 0) {
+    if (strcmp(args[0], "cd") == 0 || strcmp(args[0], "path") == 0 || strcmp(args[0], "exit") == 0) {
         return 1;
     }
     return 0;
